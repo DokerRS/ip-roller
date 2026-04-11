@@ -187,7 +187,7 @@ chmod +x regru_roller.sh
 
 ---
 
-## Режим Floating IP (cookie + GraphQL)
+## Режим Floating IP (cookie + GraphQL) - Только для пользователей с верифицированным аккаунтом в reg.cloud
 
 - Работает через **сессию браузера** `cloud.reg.ru`: в конфиге задаётся полная строка **Cookie** и **`service_id`**.  
 - Скрипт обновляет JWT (`login.reg.ru/refresh`), получает краткоживущий **Bearer** (`subscription_tokens`), вызывает **GraphQL** создания/списка/удаления плавающих IP.  
