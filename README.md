@@ -17,6 +17,7 @@
 [![GitHub ip-roller](https://img.shields.io/badge/GitHub-ip--roller-181717?style=flat&logo=github)](https://github.com/bUmmy1337/ip-roller)
 
 Исходники и обсуждения: **[github.com/bUmmy1337/ip-roller](https://github.com/bUmmy1337/ip-roller)**.
+Поддержать материально: **[donate](https://yoomoney.ru/to/4100118221862887)**.
 
 </div>
 
