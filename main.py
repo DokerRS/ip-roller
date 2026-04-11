@@ -1,4 +1,5 @@
 import time
+import random
 import requests
 import ipaddress
 import sys
@@ -68,6 +69,68 @@ def print_ascii_art(animated=False, char_delay=0.0035, line_delay=0.05):
     for raw_line in ASCII_ART.splitlines():
         _animate_ascii_line(raw_line, char_delay)
         time.sleep(line_delay)
+
+
+# ==========================================
+#     РАНДОМИЗАЦИЯ ИМЁН И ТАЙМИНГОВ
+# ==========================================
+
+def generate_random_vm_name(config: dict) -> str:
+    """Генерирует случайное имя VM на основе настроек рандомизации."""
+    name_cfg = config.get("name_randomization", {})
+    if not name_cfg.get("enabled", False):
+        return config.get("server_payload", {}).get("name", "vm")
+
+    base_name = config.get("server_payload", {}).get("name", "vm")
+    pattern = name_cfg.get("pattern", "{base}-{random}")
+
+    # Формируем случайную часть
+    prefixes = name_cfg.get("random_prefixes", ["test", "dev", "stg"])
+    chosen_prefix = random.choice(prefixes) if prefixes else ""
+
+    if name_cfg.get("random_numbers", True):
+        digits = name_cfg.get("random_number_digits", 2)
+        number_part = str(random.randint(0, 10 ** digits - 1)).zfill(digits)
+        random_part = f"{chosen_prefix}{number_part}" if chosen_prefix else number_part
+    else:
+        random_part = chosen_prefix
+
+    # Подставляем в шаблон
+    return pattern.format(base=base_name, random=random_part)
+
+
+def get_random_iteration_delay(config: dict) -> float:
+    """Возвращает случайную задержку между итерациями (имитация человека)."""
+    timings_rand = config.get("timings_randomization", {})
+    if not timings_rand.get("enabled", False):
+        return 0
+
+    # Определяем: обычная пауза или долгая
+    if random.random() < timings_rand.get("long_pause_probability", 0.15):
+        # Долгая пауза 1-2 минуты
+        pause_min = timings_rand.get("long_pause_min", 1) * 60
+        pause_max = timings_rand.get("long_pause_max", 2) * 60
+        delay = random.uniform(pause_min, pause_max)
+        pause_type = "долгая"
+    else:
+        # Обычная пауза 6-12 секунд
+        delay = random.uniform(
+            timings_rand.get("between_iterations_min", 6),
+            timings_rand.get("between_iterations_max", 12),
+        )
+        pause_type = "обычная"
+
+    log.info(f"Рандомизация: {pause_type} пауза {delay:.1f}с")
+    return delay
+
+
+def print_pause_banner(delay: float):
+    """Красиво выводит информацию о паузе."""
+    if delay >= 60:
+        mins = delay / 60
+        print(f"\n{C.DIM}😴 Пауза {mins:.1f} мин...{C.RESET}")
+    else:
+        print(f"\n{C.DIM}😴 Пауза {delay:.1f}с...{C.RESET}")
 
 
 def prompt_line_with_completions(label: str, current: str, completions):
@@ -386,6 +449,30 @@ DEFAULT_CONFIG = {
         "stability_checks": 3,
         "delete_wait": 10
     },
+    # Рандомизация для имитации человеческого поведения
+    "name_randomization": {
+        "enabled": True,
+        # Шаблон имени: {base} — базовое имя, {random} — случайная часть
+        # Варианты: "{base}-{random}", "{base}{random}", "{random}-{base}", "{random}"
+        "pattern": "{base}-{random}",
+        # Префиксы для случайной части (выбирается один рандомно)
+        "random_prefixes": ["test", "dev", "stg", "prod", "app", "web", "db", "api", "srv", "node", "vm", "box"],
+        # Использовать ли числа в случайной части
+        "random_numbers": True,
+        # Длина числовой части (сколько цифр)
+        "random_number_digits": 2,
+    },
+    "timings_randomization": {
+        "enabled": True,
+        # Базовая пауза между итерациями (секунды): от и до
+        "between_iterations_min": 6,
+        "between_iterations_max": 12,
+        # Вероятность долгой паузы (0.0 — никогда, 1.0 — всегда)
+        "long_pause_probability": 0.15,
+        # Долгая пауза (минуты): от и до
+        "long_pause_min": 1,
+        "long_pause_max": 2,
+    },
     "notifications": {
         "telegram_bot_token": "",
         "telegram_chat_id": "",
@@ -591,13 +678,15 @@ class InteractiveMenu:
         payload = self.config["server_payload"]
         timings = self.config["timings"]
         notif = self.config.get("notifications", {})
+        nr = self.config.get("name_randomization", {})
+        tr = self.config.get("timings_randomization", {})
         print(f"\n{C.BOLD}{C.MAGENTA}=== ТЕКУЩИЕ НАСТРОЙКИ ==={C.RESET}")
         print(f"Конфиг                : {self.config_manager.config_file}")
         print(f"Токен API             : {self._mask_secret(self.config.get('api_token', ''))}")
         print(f"API URL               : {self.config.get('api_base_url', '')}")
         print(f"Нужно серверов        : {self.config.get('max_success', 1)}")
         print(f"Подсети               : {', '.join(self.config.get('target_subnets', []))}")
-        print(f"Имя сервера           : {payload.get('name', '')}")
+        print(f"Имя сервера (база)    : {payload.get('name', '')}")
         print(f"Регион                : {payload.get('region_slug', '')}")
         print(f"Размер                : {payload.get('size', '')}")
         print(f"Образ                 : {payload.get('image', '')}")
@@ -607,6 +696,10 @@ class InteractiveMenu:
         print(f"Интервал проверки     : {timings.get('check_interval', 0)} сек")
         print(f"Проверок стабильности : {timings.get('stability_checks', 0)}")
         print(f"Пауза после удаления  : {timings.get('delete_wait', 0)} сек")
+        print(f"Рандом. имён          : {'вкл' if nr.get('enabled') else 'выкл'} | шаблон: {nr.get('pattern', '')}")
+        print(f"Рандом. таймингов     : {'вкл' if tr.get('enabled') else 'выкл'} | "
+              f"{tr.get('between_iterations_min', 6)}-{tr.get('between_iterations_max', 12)}с | "
+              f"долгая: {int(tr.get('long_pause_probability', 0.15) * 100)}%")
         print(f"Heartbeat (floating)  : {notif.get('heartbeat_interval_min', 0)} мин")
         print(f"Сохранены в файл      : {'нет' if self.is_dirty else 'да'}")
         print(f"{C.MAGENTA}==========================={C.RESET}\n")
@@ -646,6 +739,41 @@ class InteractiveMenu:
         self.config["api_base_url"] = self._prompt_text("API base URL", self.config.get("api_base_url", ""))
         self._mark_dirty()
 
+    def _edit_name_randomization(self):
+        nr = self.config.setdefault("name_randomization", copy.deepcopy(DEFAULT_CONFIG["name_randomization"]))
+        print(f"\n{C.BOLD}Рандомизация имён VM{C.RESET}")
+        nr["enabled"] = self._prompt_bool("Включить рандомизацию имён", nr.get("enabled", True))
+        nr["pattern"] = self._prompt_text(
+            "Шаблон ({base}, {random})",
+            nr.get("pattern", "{base}-{random}"),
+        )
+        current_prefixes = ", ".join(nr.get("random_prefixes", []))
+        print(f"Текущие префиксы: {current_prefixes}")
+        raw = self._read_choice("Новые префиксы через запятую (пустой ввод — оставить): ")
+        if raw:
+            nr["random_prefixes"] = [p.strip() for p in raw.split(",") if p.strip()]
+        nr["random_numbers"] = self._prompt_bool("Добавлять числа к префиксам", nr.get("random_numbers", True))
+        nr["random_number_digits"] = self._prompt_int("Количество цифр", nr.get("random_number_digits", 2), min_value=1)
+        self._mark_dirty()
+
+    def _edit_timings_randomization(self):
+        tr = self.config.setdefault("timings_randomization", copy.deepcopy(DEFAULT_CONFIG["timings_randomization"]))
+        print(f"\n{C.BOLD}Рандомизация таймингов (имитация человека){C.RESET}")
+        tr["enabled"] = self._prompt_bool("Включить рандомизацию таймингов", tr.get("enabled", True))
+        tr["between_iterations_min"] = self._prompt_int(
+            "Мин. пауза между итерациями, сек", tr.get("between_iterations_min", 6), min_value=1
+        )
+        tr["between_iterations_max"] = self._prompt_int(
+            "Макс. пауза между итерациями, сек", tr.get("between_iterations_max", 12), min_value=1
+        )
+        # Вероятность в процентах
+        current_prob = int(tr.get("long_pause_probability", 0.15) * 100)
+        new_prob = self._prompt_int("Вероятность долгой паузы, %", current_prob, min_value=0)
+        tr["long_pause_probability"] = new_prob / 100.0
+        tr["long_pause_min"] = self._prompt_int("Мин. долгая пауза, мин", tr.get("long_pause_min", 1), min_value=1)
+        tr["long_pause_max"] = self._prompt_int("Макс. долгая пауза, мин", tr.get("long_pause_max", 2), min_value=1)
+        self._mark_dirty()
+
     def _save_config(self):
         try:
             self.config_manager.save_config(self.config)
@@ -676,6 +804,8 @@ class InteractiveMenu:
             "Показать текущие настройки",
             "Изменить количество целей",
             "Изменить тайминги",
+            "Рандомизация имён VM",
+            "Рандомизация таймингов (человек)",
             "Изменить параметры сервера",
             "Изменить API (токен, URL)",
             "Изменить целевые подсети",
@@ -703,22 +833,28 @@ class InteractiveMenu:
                 self._edit_timings()
                 continue
             if choice == 4:
-                self._edit_server_payload()
+                self._edit_name_randomization()
                 continue
             if choice == 5:
-                self._edit_api_settings()
+                self._edit_timings_randomization()
                 continue
             if choice == 6:
-                self._prompt_subnets()
+                self._edit_server_payload()
                 continue
             if choice == 7:
-                self._save_config()
+                self._edit_api_settings()
                 continue
             if choice == 8:
+                self._prompt_subnets()
+                continue
+            if choice == 9:
+                self._save_config()
+                continue
+            if choice == 10:
                 if self._confirm_exit():
                     return "hub"
                 continue
-            if choice == 9:
+            if choice == 11:
                 if self._confirm_exit():
                     return "exit"
                 continue
@@ -806,6 +942,10 @@ class FloatingCookieMenu:
         print(f"Макс. проверок   : {t.get('max_checks')}")
         print(f"Пауза после удал.: {t.get('delete_wait')} сек")
         print(f"Очистка каждые N : {t.get('cleanup_check_interval', 50)}")
+        tr = self.config.get("timings_randomization", {})
+        print(f"Рандом. таймингов  : {'вкл' if tr.get('enabled') else 'выкл'} | "
+              f"{tr.get('between_iterations_min', 6)}-{tr.get('between_iterations_max', 12)}с | "
+              f"долгая: {int(tr.get('long_pause_probability', 0.15) * 100)}%")
         print(f"Telegram         : {tg_ok} | heartbeat: {n.get('heartbeat_interval_min', 0)} мин")
         print(f"Несохранено      : {'да' if self.is_dirty else 'нет'}")
         print(f"{C.MAGENTA}══════════════════════════{C.RESET}\n")
@@ -840,6 +980,23 @@ class FloatingCookieMenu:
         t["cleanup_check_interval"] = self._prompt_int(
             "Очистка каждые N итераций (0=выкл)", t.get("cleanup_check_interval", 50), 0
         )
+        self._dirty()
+
+    def _edit_timings_randomization(self):
+        tr = self.config.setdefault("timings_randomization", copy.deepcopy(DEFAULT_CONFIG["timings_randomization"]))
+        print(f"\n{C.BOLD}Рандомизация таймингов (имитация человека){C.RESET}")
+        tr["enabled"] = self._prompt_bool("Включить рандомизацию таймингов", tr.get("enabled", True))
+        tr["between_iterations_min"] = self._prompt_int(
+            "Мин. пауза между итерациями, сек", tr.get("between_iterations_min", 6), min_value=1
+        )
+        tr["between_iterations_max"] = self._prompt_int(
+            "Макс. пауза между итерациями, сек", tr.get("between_iterations_max", 12), min_value=1
+        )
+        current_prob = int(tr.get("long_pause_probability", 0.15) * 100)
+        new_prob = self._prompt_int("Вероятность долгой паузы, %", current_prob, min_value=0)
+        tr["long_pause_probability"] = new_prob / 100.0
+        tr["long_pause_min"] = self._prompt_int("Мин. долгая пауза, мин", tr.get("long_pause_min", 1), min_value=1)
+        tr["long_pause_max"] = self._prompt_int("Макс. долгая пауза, мин", tr.get("long_pause_max", 2), min_value=1)
         self._dirty()
 
     def _edit_notifications(self):
@@ -883,6 +1040,7 @@ class FloatingCookieMenu:
             "Регион и Service ID",
             "Подсети (общие с VM)",
             "Тайминги Floating",
+            "Рандомизация таймингов (человек)",
             "Telegram / Discord / heartbeat",
             "Сохранить config.json",
             "Назад в хаб режимов",
@@ -909,13 +1067,15 @@ class FloatingCookieMenu:
             elif choice == 5:
                 self._edit_timings()
             elif choice == 6:
-                self._edit_notifications()
+                self._edit_timings_randomization()
             elif choice == 7:
-                self._save()
+                self._edit_notifications()
             elif choice == 8:
+                self._save()
+            elif choice == 9:
                 if self._confirm_exit():
                     return "hub"
-            elif choice == 9:
+            elif choice == 10:
                 if self._confirm_exit():
                     return "exit"
 
@@ -1257,7 +1417,7 @@ class SessionManager:
 class FloatingIpRoller:
     """Роллинг публичных адресов через create/delete Floating IP (GraphQL + cookie)."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, full_config: dict = None):
         self.region = config["region"]
         self.service_id = config.get("service_id", "")
         self.target_subnets = []
@@ -1273,6 +1433,9 @@ class FloatingIpRoller:
         self.max_checks = t["max_checks"]
         self.delete_wait = t["delete_wait"]
         self.cleanup_check_interval = t.get("cleanup_check_interval", 50)
+
+        # Полный конфиг для рандомизации
+        self.full_config = full_config or config
 
         self.session_mgr = SessionManager(config["cookie"], self.service_id)
         self.http = requests.Session()
@@ -1589,6 +1752,13 @@ class FloatingIpRoller:
                     self.current_ip_addr = None
                     break
                 self._safe_delete(ip_id, ip_addr)
+
+                # Рандомизация паузы между итерациями
+                random_delay = get_random_iteration_delay(self.full_config)
+                if random_delay > 0:
+                    print_pause_banner(random_delay)
+                    time.sleep(random_delay)
+
                 iteration += 1
         except KeyboardInterrupt:
             self._handle_interrupt()
@@ -2016,9 +2186,17 @@ class RegruRoller:
     def create_and_wait(self) -> dict:
         print(f"\n{C.BLUE}[>>]{C.RESET} Создание сервера...")
         log.info("Отправка запроса на создание сервера.")
-        
+
+        # Рандомизация имени сервера
+        payload_to_send = copy.deepcopy(self.payload)
+        random_name = generate_random_vm_name(self.config)
+        if random_name != self.payload.get("name", "vm"):
+            payload_to_send["name"] = random_name
+            log.info(f"Случайное имя сервера: {random_name}")
+            print(f"{C.DIM}[name]{C.RESET} Имя: {C.CYAN}{random_name}{C.RESET}")
+
         try:
-            resp = self.session.post(self.api_base_url, json=self.payload, timeout=15)
+            resp = self.session.post(self.api_base_url, json=payload_to_send, timeout=15)
             resp.raise_for_status()
             created_reglet = self._extract_reglet_object(resp.json())
             server_id = created_reglet.get('id')
@@ -2203,6 +2381,12 @@ class RegruRoller:
                 else:
                     self.safe_delete(server_id)
 
+                # Рандомизация паузы между итерациями
+                random_delay = get_random_iteration_delay(self.config)
+                if random_delay > 0:
+                    print_pause_banner(random_delay)
+                    time.sleep(random_delay)
+
                 iteration += 1
 
         except KeyboardInterrupt:
@@ -2304,7 +2488,7 @@ def run_mode_hub_loop(cfg_manager: ConfigManager, config: dict) -> None:
             config = fmenu.config
             cfg_manager.config = config
             if action == "run":
-                FloatingIpRoller(_floating_effective_config(config)).run(show_banner=False)
+                FloatingIpRoller(_floating_effective_config(config), full_config=config).run(show_banner=False)
             elif action == "exit":
                 return
             clear_before_hub = True
@@ -2329,7 +2513,7 @@ def main():
         return
 
     if args.mode == "floating":
-        FloatingIpRoller(_floating_effective_config(config)).run(show_banner=False)
+        FloatingIpRoller(_floating_effective_config(config), full_config=config).run(show_banner=False)
     else:
         RegruRoller(config).run(show_banner=False)
 
